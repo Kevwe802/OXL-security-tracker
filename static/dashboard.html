@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OXL Security Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <style>
+    #map { height: 70vh; width: 100%; max-width: 800px; }
+    .glow-dot-red { filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.8)); }
+    .radar-pulse { position: absolute; width: 20px; height: 20px; background: rgba(0, 128, 255, 0.2); border-radius: 50%; animation: pulse 2s infinite; transform-origin: center; }
+    @keyframes pulse { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(3); opacity: 0; } }
+    .history-list { max-height: 200px; overflow-y: auto; }
+    #loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      transition: opacity 0.5s;
+    }
+    #loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center p-4">
+  <div id="loading-overlay">
+    <div id="loading-scene"></div>
+    <div id="loading-text" class="text-white text-2xl mt-4">Loading Family Security...</div>
+  </div>
+  <h1 class="text-2xl font-bold mb-4">Family Security Dashboard</h1>
+  <div id="onlineUsers" class="mb-4"></div>
+  <div id="map"></div>
+
+  <script>
+    // Three.js Loading Scene
+    let scene, camera, renderer, logo;
+    function initLoadingScene() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.getElementById('loading-scene').appendChild(renderer.domElement);
+
+      const loader = new THREE.TextureLoader();
+      loader.load('/static/logo.png', (texture) => {
+        const geometry = new THREE.PlaneGeometry(5, 5);
+        const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+        logo = new THREE.Mesh(geometry, material);
+        scene.add(logo);
+        logo.position.z = -5;
+      });
+
+      camera.position.z = 5;
+      animateLoading();
+    }
+
+    function animateLoading() {
+      requestAnimationFrame(animateLoading);
+      if (logo) logo.rotation.y += 0.02;
+      renderer.render(scene, camera);
+    }
+
+    initLoadingScene();
+    window.addEventListener('resize', () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+    });
+
+    // Map and Data
+    const map = L.map('map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19
+    }).addTo(map);
+
+    const redDotIcon = L.divIcon({
+      html: `<div style="width: 10px; height: 10px; background: red; border-radius: 50%;" class="glow-dot-red"></div><div class="radar-pulse"></div>`,
+      className: '', iconSize: [10, 10], iconAnchor: [5, 5]
+    });
+
+    const markers = {};
+    const onlineUsers = new Set();
+
+    function updateMap() {
+      fetch('https://your-render-url/get_users')
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            const userList = document.getElementById('onlineUsers');
+            userList.innerHTML = '<h2 class="text-xl">Online Users:</h2><ul>';
+            data.users.forEach(user => {
+              userList.innerHTML += `<li>${user.user_id} (${onlineUsers.has(user.user_id) ? 'Online' : 'Offline'})<ul class="history-list">`;
+              if (user.history) {
+                user.history.forEach(h => {
+                  userList.innerHTML += `<li>Lat: ${h.latitude}, Lon: ${h.longitude}, Time: ${h.timestamp}</li>`;
+                });
+              }
+              userList.innerHTML += '</ul></li>';
+              if (onlineUsers.has(user.user_id) && user.latitude && user.longitude) {
+                if (markers[user.user_id]) {
+                  markers[user.user_id].setLatLng([user.latitude, user.longitude]);
+                } else {
+                  markers[user.user_id] = L.marker([user.latitude, user.longitude], { icon: redDotIcon })
+                    .addTo(map)
+                    .bindPopup(`Family ID: ${user.user_id}`);
+                }
+                map.setView([user.latitude, user.longitude], 13);
+              }
+            });
+            userList.innerHTML += '</ul>';
+            document.getElementById('loading-overlay').classList.add('hidden');
+          }
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    const socket = io('https://your-render-url');
+    socket.on('user_status', (data) => {
+      if (data.online) onlineUsers.add(data.user_id);
+      else onlineUsers.delete(data.user_id);
+      updateMap();
+    });
+
+    socket.on('location_update', (data) => {
+      onlineUsers.add(data.user_id);
+      if (data.latitude && data.longitude) {
+        if (markers[data.user_id]) {
+          markers[data.user_id].setLatLng([data.latitude, data.longitude]);
+        } else {
+          markers[user_id] = L.marker([data.latitude, data.longitude], { icon: redDotIcon })
+            .addTo(map)
+            .bindPopup(`Family ID: ${data.user_id}`);
+        }
+        map.setView([data.latitude, data.longitude], 13);
+      }
+      updateMap();
+    });
+
+    updateMap();
+    setInterval(updateMap, 5000);
+  </script>
+</body>
+</html>

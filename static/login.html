@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/feather-icons"></script>
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-black text-white flex items-center justify-center h-screen">
+
+  <div class="bg-black border border-white p-6 rounded-lg shadow-lg w-full max-w-md">
+    <h2 class="text-2xl font-bold mb-4 text-center">Family Security Login</h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          {% set color = 'red' if category == 'error' else 'green' %}
+          <div class="p-2 mb-2 text-{{ color }}-500 text-sm font-semibold">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" class="space-y-4">
+      <div>
+        <label for="username" class="block">Username</label>
+        <input type="text" id="username" name="username" class="w-full p-2 rounded bg-black text-white border border-white" required>
+      </div>
+
+      <div>
+        <label for="password" class="block">Password</label>
+        <input type="password" id="password" name="password" class="w-full p-2 rounded bg-black text-white border border-white" required>
+      </div>
+
+      <div class="flex items-center text-sm">
+        <input type="checkbox" id="remember" name="remember" class="mr-2 accent-white bg-black border-white border">
+        <label for="remember">Remember Me</label>
+      </div>
+
+      <button type="submit" class="w-full bg-white text-black p-2 rounded hover:opacity-80 flex items-center justify-center gap-2 font-semibold">
+        <i data-feather="log-in" class="text-black"></i> Login
+      </button>
+    </form>
+
+    <a href="{{ url_for('logout') }}" class="mt-4 block text-center underline text-sm hover:text-white">Logout</a>
+  </div>
+
+  <script>
+    feather.replace();
+  </script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OXL Security Tracker</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" href="/static/icon.png" type="image/png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+</head>
+<body class="bg-black text-white flex flex-col items-center justify-center h-screen">
+  <h1 class="text-2xl font-bold mb-4">OXL Security Tracker</h1>
+  <p class="text-sm mb-4">This app shares your location for family safety. Consent is required.</p>
+  
+  <input id="userId" type="text" placeholder="Enter Family ID"
+         class="border border-white bg-black text-white p-2 mb-4 w-64 placeholder-white" />
+
+  <div id="status" class="text-lg mb-4">Enter Family ID to start</div>
+  <div id="coordinates" class="text-lg"></div>
+
+  <button id="startTracking" class="bg-white text-black px-4 py-2 rounded mt-4">Start Tracking</button>
+  <button id="stopTracking" class="bg-white text-black px-4 py-2 rounded mt-4 hidden">Stop Tracking</button>
+
+  <script>
+    let watchId = null;
+    const socket = io('https://your-render-url'); // Replace with actual URL
+
+    function requestPermission() {
+      if (navigator.permissions) {
+        navigator.permissions.query({ name: 'geolocation' }).then(permission => {
+          if (permission.state === 'granted') {
+            startLocationUpdates();
+          } else if (permission.state === 'prompt') {
+            navigator.geolocation.getCurrentPosition(
+              () => startLocationUpdates(),
+              () => alert('Please grant location permission for family safety.'),
+              { enableHighAccuracy: true }
+            );
+          }
+        });
+      }
+    }
+
+    function startLocationUpdates() {
+      const userId = document.getElementById('userId').value.trim();
+      if (!userId) {
+        document.getElementById('status').innerText = 'Please enter a Family ID';
+        return;
+      }
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            document.getElementById('coordinates').innerText = `Lat: ${lat}, Lon: ${lon}`;
+            document.getElementById('status').innerText = `Tracking for ${userId}...`;
+            socket.emit('location_update', { user_id: userId, latitude: lat, longitude: lon });
+          },
+          (error) => document.getElementById('status').innerText = `Error: ${error.message}`,
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+        );
+        document.getElementById('startTracking').classList.add('hidden');
+        document.getElementById('stopTracking').classList.remove('hidden');
+        socket.emit('join', { user_id: userId });
+      }
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        document.getElementById('status').innerText = 'Tracking stopped';
+        document.getElementById('coordinates').innerText = '';
+        const userId = document.getElementById('userId').value.trim();
+        socket.emit('leave', { user_id: userId });
+        document.getElementById('startTracking').classList.remove('hidden');
+        document.getElementById('stopTracking').classList.add('hidden');
+      }
+    }
+
+    document.getElementById('startTracking').addEventListener('click', requestPermission);
+    document.getElementById('stopTracking').addEventListener('click', stopTracking);
+
+    // Background sync (if supported)
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      navigator.serviceWorker.register('/static/sw.js').then(reg => {
+        reg.pushManager.subscribe({ userVisibleOnly: true });
+        reg.sync.register('sync-location').catch(() => {
+          setInterval(() => {
+            if (watchId && navigator.onLine) startLocationUpdates();
+          }, 30000);
+        });
+      });
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js')
+        .then(() => console.log('Service Worker registered'))
+        .catch(err => console.error('Service Worker error:', err));
+    }
+  </script>
+</body>
+</html>
