@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Splash Screen</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: black;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Splash Container */
+    #splash {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      opacity: 0;
+      animation: fadeIn 1.5s ease forwards, fadeOut 1s ease forwards;
+      animation-delay: 1s, 5s; /* Blackout first, fade out at the end */
+    }
+
+    #logo {
+      width: 90vh; /* Increased from 35vh to 50vh for a larger logo */
+      height: auto;
+      opacity: 0;
+      filter: drop-shadow(0 0 0px white);
+      animation: logoGlow 2s ease-in-out forwards, glowPulse 2s ease-in-out infinite alternate;
+      animation-delay: 1s, 3s;
+    }
+
+    /* Glow-in effect for turning on */
+    @keyframes logoGlow {
+      0% {
+        opacity: 0;
+        filter: drop-shadow(0 0 0px white);
+      }
+      50% {
+        opacity: 0.5;
+        filter: drop-shadow(0 0 10px white);
+      }
+      100% {
+        opacity: 1;
+        filter: drop-shadow(0 0 20px white);
+      }
+    }
+
+    /* Gentle pulsing glow after it turns on */
+    @keyframes glowPulse {
+      from {
+        filter: drop-shadow(0 0 15px white) drop-shadow(0 0 25px white);
+      }
+      to {
+        filter: drop-shadow(0 0 25px white) drop-shadow(0 0 35px white);
+      }
+    }
+
+    /* Progress Bar Container */
+    .progress-container {
+      width: 200px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      margin-top: 20px;
+      overflow: hidden;
+      opacity: 0;
+      animation: fadeIn 1s ease forwards;
+      animation-delay: 3s; /* Show after logo glows in */
+    }
+
+    /* Progress Bar Fill */
+    .progress-bar {
+      width: 0;
+      height: 100%;
+      background: white;
+      animation: fillBar 2.5s ease forwards;
+      animation-delay: 3.2s;
+    }
+
+    @keyframes fillBar {
+      from { width: 0; }
+      to { width: 100%; }
+    }
+
+    /* Fade In Animation */
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+
+    /* Fade Out Animation */
+    @keyframes fadeOut {
+      to {
+        opacity: 0;
+        visibility: hidden;
+      }
+    }
+
+    /* Mobile Device Adjustments */
+    @media (max-width: 640px) {
+      #logo {
+        width: 40vh; /* Reduced from 50vh for mobile */
+        max-width: 250px; /* Cap to prevent overflow on very small screens */
+      }
+      .progress-container {
+        width: 150px; /* Reduced width for mobile */
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Splash Screen -->
+  <div id="splash">
+    <img id="logo" src="{{ url_for('static', filename='icon-512.png') }}" alt="Logo">
+    <div class="progress-container">
+      <div class="progress-bar"></div>
+    </div>
+  </div>
+
+  <!-- Sound -->
+  <audio id="splashSound" preload="auto">
+    <source src="{{ url_for('static', filename='idea-spark.mp3') }}" type="audio/mpeg">
+    Your browser does not support the audio element.
+  </audio>
+
+  <script>
+    window.addEventListener("load", () => {
+      const sound = document.getElementById("splashSound");
+
+      // Start muted to bypass autoplay restrictions
+      sound.volume = 0;
+      sound.play().then(() => {
+        // Fade in volume as logo starts glowing
+        setTimeout(() => {
+          let vol = 0;
+          const fadeIn = setInterval(() => {
+            vol += 0.05;
+            if (vol >= 0.5) {
+              vol = 0.5;
+              clearInterval(fadeIn);
+            }
+            sound.volume = vol;
+          }, 50);
+        }, 1000); // Sync with logoGlow start
+      }).catch(err => console.log("Autoplay blocked:", err));
+
+      // Redirect after splash ends
+      setTimeout(() => {
+        window.location.href = "{{ url_for('login') }}";
+      }, 6000);
+    });
+  </script>
+</body>
+</html>

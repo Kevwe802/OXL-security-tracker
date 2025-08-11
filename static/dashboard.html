@@ -4,16 +4,49 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OXL Security Dashboard</title>
+  <link rel="icon" type="image/png" href="static\icon.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
   <style>
-    #map { height: 70vh; width: 100%; max-width: 800px; }
+    #map {
+      height: 100vh;
+      width: 100vw;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 0;
+    }
     .glow-dot-red { filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.8)); }
-    .radar-pulse { position: absolute; width: 20px; height: 20px; background: rgba(0, 128, 255, 0.2); border-radius: 50%; animation: pulse 2s infinite; transform-origin: center; }
-    @keyframes pulse { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(3); opacity: 0; } }
-    .history-list { max-height: 200px; overflow-y: auto; }
+    .glow-dot-green { filter: drop-shadow(0 0 8px rgba(0, 255, 0, 0.8)); }
+    /* Removed .radar-pulse to eliminate any radar association */
+    .moving-dot {
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      background: green;
+      border-radius: 50%;
+      animation: moveAlongTrail 5s linear infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.3; }
+      100% { transform: scale(2.5); opacity: 0; }
+    }
+    @keyframes moveAlongTrail {
+      0% { transform: translate(0, 0); }
+      100% { transform: translate(100%, 0); }
+    }
+    .history-list {
+      max-height: 150px;
+      overflow-y: auto;
+      display: none;
+      position: absolute;
+      background: #1f2937;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1000;
+    }
     #loading-overlay {
       position: fixed;
       top: 0;
@@ -31,54 +64,35 @@
       opacity: 0;
       pointer-events: none;
     }
+    .dashboard-content {
+      position: relative;
+      z-index: 10;
+      padding: 20px;
+      color: white;
+      text-align: center;
+    }
+    @media (max-width: 640px) {
+      .dashboard-content { padding: 10px; }
+      .history-list { max-height: 100px; }
+    }
   </style>
 </head>
-<body class="bg-gray-900 text-white flex flex-col items-center p-4">
+<body class="bg-gray-900">
   <div id="loading-overlay">
-    <div id="loading-scene"></div>
-    <div id="loading-text" class="text-white text-2xl mt-4">Loading Family Security...</div>
+    <div id="loading-text" class="text-white text-2xl">Loading...</div>
   </div>
-  <h1 class="text-2xl font-bold mb-4">Family Security Dashboard</h1>
-  <div id="onlineUsers" class="mb-4"></div>
+  <div class="dashboard-content">
+    <h1 class="text-2xl font-bold mb-4">OXL Security</h1>
+    <div class="mb-4">
+      <button id="toggleView" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Toggle View: All</button>
+    </div>
+    <a href="/add_device" class="mb-4 text-gray-400 underline">Add New Device</a>
+    <div id="onlineUsers" class="mb-4 w-full max-w-md"></div>
+  </div>
   <div id="map"></div>
 
   <script>
-    // Three.js Loading Scene
-    let scene, camera, renderer, logo;
-    function initLoadingScene() {
-      scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      renderer = new THREE.WebGLRenderer({ alpha: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.getElementById('loading-scene').appendChild(renderer.domElement);
-
-      const loader = new THREE.TextureLoader();
-      loader.load('/static/logo.png', (texture) => {
-        const geometry = new THREE.PlaneGeometry(5, 5);
-        const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-        logo = new THREE.Mesh(geometry, material);
-        scene.add(logo);
-        logo.position.z = -5;
-      });
-
-      camera.position.z = 5;
-      animateLoading();
-    }
-
-    function animateLoading() {
-      requestAnimationFrame(animateLoading);
-      if (logo) logo.rotation.y += 0.02;
-      renderer.render(scene, camera);
-    }
-
-    initLoadingScene();
-    window.addEventListener('resize', () => {
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-    });
-
-    // Map and Data
+    const baseUrl = window.location.origin;
     const map = L.map('map').setView([0, 0], 2);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -86,47 +100,112 @@
     }).addTo(map);
 
     const redDotIcon = L.divIcon({
-      html: `<div style="width: 10px; height: 10px; background: red; border-radius: 50%;" class="glow-dot-red"></div><div class="radar-pulse"></div>`,
+      html: `<div style="width: 10px; height: 10px; background: red; border-radius: 50%;" class="glow-dot-red"></div>`,
+      className: '', iconSize: [10, 10], iconAnchor: [5, 5]
+    });
+    const greenDotIcon = L.divIcon({
+      html: `<div style="width: 10px; height: 10px; background: green; border-radius: 50%;" class="glow-dot-green"></div>`,
       className: '', iconSize: [10, 10], iconAnchor: [5, 5]
     });
 
     const markers = {};
+    const trails = {};
     const onlineUsers = new Set();
+    let currentPopup = null;
+    let viewMode = 'all';
+
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    function showHistory(user) {
+      if (currentPopup) currentPopup.remove();
+      if (onlineUsers.has(user.user_id)) {
+        let distanceHtml = '';
+        data.users.forEach(otherUser => {
+          if (otherUser.user_id !== user.user_id && otherUser.latitude && otherUser.longitude) {
+            const distance = calculateDistance(user.latitude, user.longitude, otherUser.latitude, otherUser.longitude).toFixed(2);
+            distanceHtml += `<li>Distance to ${otherUser.user_id}: ${distance} km</li>`;
+          }
+        });
+        const historyHtml = `<ul class="history-list">${user.history.slice(-3).map(h => `<li>Lat: ${h.latitude}, Lon: ${h.longitude}, Time: ${h.timestamp}</li>`).join('')}${distanceHtml ? `<li>Distances:</li>${distanceHtml}` : ''}</ul>`;
+        currentPopup = L.popup()
+          .setLatLng([user.latitude, user.longitude])
+          .setContent(historyHtml)
+          .openOn(map);
+      }
+    }
 
     function updateMap() {
-      fetch('https://your-render-url/get_users')
-        .then(response => response.json())
+      fetch(`${baseUrl}/get_users`)
+        .then(response => {
+          if (!response.ok) throw new Error('Network response was not ok');
+          return response.json();
+        })
         .then(data => {
           if (data.status === 'success') {
             const userList = document.getElementById('onlineUsers');
-            userList.innerHTML = '<h2 class="text-xl">Online Users:</h2><ul>';
-            data.users.forEach(user => {
-              userList.innerHTML += `<li>${user.user_id} (${onlineUsers.has(user.user_id) ? 'Online' : 'Offline'})<ul class="history-list">`;
-              if (user.history) {
-                user.history.forEach(h => {
-                  userList.innerHTML += `<li>Lat: ${h.latitude}, Lon: ${h.longitude}, Time: ${h.timestamp}</li>`;
-                });
-              }
-              userList.innerHTML += '</ul></li>';
-              if (onlineUsers.has(user.user_id) && user.latitude && user.longitude) {
+            userList.innerHTML = '<h2 class="text-xl">Members:</h2><ul class="text-center">';
+            const filteredUsers = data.users.filter(user => {
+              if (viewMode === 'all') return true;
+              if (viewMode === 'online') return onlineUsers.has(user.user_id);
+              return false;
+            });
+            filteredUsers.forEach(user => {
+              userList.innerHTML += `<li class="mb-2">${user.user_id} (${onlineUsers.has(user.user_id) ? 'Online' : 'Offline'})</li>`;
+              const isOnline = onlineUsers.has(user.user_id);
+              if (user.latitude && user.longitude) {
+                const icon = isOnline ? greenDotIcon : redDotIcon;
                 if (markers[user.user_id]) {
                   markers[user.user_id].setLatLng([user.latitude, user.longitude]);
+                  markers[user.user_id].setIcon(icon);
                 } else {
-                  markers[user.user_id] = L.marker([user.latitude, user.longitude], { icon: redDotIcon })
+                  markers[user.user_id] = L.marker([user.latitude, user.longitude], { icon: icon })
                     .addTo(map)
-                    .bindPopup(`Family ID: ${user.user_id}`);
+                    .bindPopup('', { autoClose: false, closeOnClick: false })
+                    .on('click', () => showHistory(user));
                 }
-                map.setView([user.latitude, user.longitude], 13);
+                if (isOnline) map.setView([user.latitude, user.longitude], 13);
+
+                // Color-coded zones
+                L.circle([user.latitude, user.longitude], {radius: 500, color: 'blue', fillColor: '#5b5b5e', fillOpacity: 0.1}).addTo(map);
+
+                // Movement trails (last 3 points)
+                if (user.history && user.history.length > 1) {
+                  if (trails[user.user_id]) map.removeLayer(trails[user.user_id]);
+                  trails[user.user_id] = L.polyline(user.history.slice(-3).map(h => [h.latitude, h.longitude]), {color: '#0073d1', weight: 1, opacity: 0.7}).addTo(map);
+                  if (isOnline && user.history.length > 1) {
+                    const lastPoint = user.history[user.history.length - 1];
+                    const secondLastPoint = user.history[user.history.length - 2];
+                    const angle = Math.atan2(lastPoint.latitude - secondLastPoint.latitude, lastPoint.longitude - secondLastPoint.longitude);
+                    markers[user.user_id].setIcon(L.divIcon({
+                      html: `<div style="width: 10px; height: 10px; background: green; border-radius: 50%;" class="glow-dot-green"></div><div class="moving-dot" style="transform: translate(${10 * Math.cos(angle)}px, ${10 * Math.sin(angle)}px);"></div>`,
+                      className: '', iconSize: [15, 15], iconAnchor: [7.5, 7.5]
+                    }));
+                  }
+                }
               }
             });
             userList.innerHTML += '</ul>';
             document.getElementById('loading-overlay').classList.add('hidden');
           }
         })
-        .catch(error => console.error('Error:', error));
+        .catch(error => {
+          console.error('Error fetching users:', error);
+          document.getElementById('loading-overlay').innerText = 'Error loading data. Check console.';
+        });
     }
 
-    const socket = io('https://your-render-url');
+    const socket = io(baseUrl);
+    socket.on('connect', () => console.log('Connected to socket:', baseUrl));
+    socket.on('connect_error', (error) => console.error('Socket connection error:', error));
     socket.on('user_status', (data) => {
       if (data.online) onlineUsers.add(data.user_id);
       else onlineUsers.delete(data.user_id);
@@ -136,15 +215,24 @@
     socket.on('location_update', (data) => {
       onlineUsers.add(data.user_id);
       if (data.latitude && data.longitude) {
+        const icon = onlineUsers.has(data.user_id) ? greenDotIcon : redDotIcon;
         if (markers[data.user_id]) {
-          markers[data.user_id].setLatLng([data.latitude, data.longitude]);
+          markers[user.user_id].setLatLng([data.latitude, data.longitude]);
+          markers[user.user_id].setIcon(icon);
         } else {
-          markers[user_id] = L.marker([data.latitude, data.longitude], { icon: redDotIcon })
+          markers[data.user_id] = L.marker([data.latitude, data.longitude], { icon: icon })
             .addTo(map)
-            .bindPopup(`Family ID: ${data.user_id}`);
+            .bindPopup('', { autoClose: false, closeOnClick: false })
+            .on('click', () => showHistory(data));
         }
         map.setView([data.latitude, data.longitude], 13);
       }
+      updateMap();
+    });
+
+    document.getElementById('toggleView').addEventListener('click', () => {
+      viewMode = viewMode === 'all' ? 'online' : 'all';
+      document.getElementById('toggleView').textContent = `Toggle View: ${viewMode === 'all' ? 'All' : 'Online'}`;
       updateMap();
     });
 
