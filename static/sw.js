@@ -1,6 +1,6 @@
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open('family-tracker-v1').then(cache => {
+    caches.open('OXL-APP-v1').then(cache => {
       return cache.addAll([
         '/',
         '/static/location_sender.html',
